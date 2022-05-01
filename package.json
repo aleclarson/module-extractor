@@ -1,0 +1,51 @@
+{
+  "name": "module-extractor",
+  "version": "0.1.0",
+  "description": "Extract a module and its dependencies into a new package",
+  "author": "Alec Larson",
+  "repository": "aleclarson/module-extractor",
+  "main": "dist/module-extractor.js",
+  "module": "dist/module-extractor.mjs",
+  "types": "dist/module-extractor.d.ts",
+  "files": [
+    "src",
+    "dist",
+    "!**/*.tsbuildinfo",
+    "!**/*.d.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p . --incremental",
+    "dev": "tsc -p . -w",
+    "prepare": "yarn build"
+  },
+  "keywords": [
+    "isolate",
+    "extract",
+    "package",
+    "files",
+    "import",
+    "graph"
+  ],
+  "devDependencies": {
+    "@alloc/prettier-config": "^1.0.0",
+    "@types/fs-extra": "^9.0.13",
+    "@types/jest": "^26.0.20",
+    "@types/resolve": "^1.20.2",
+    "esbuild-jest": "npm:@alloc/esbuild-jest@^0.3.0",
+    "jest": "^26.6.3",
+    "kleur": "^4.1.4",
+    "prettier": "^2.0.5",
+    "typescript": "^4.0.0"
+  },
+  "prettier": "@alloc/prettier-config",
+  "dependencies": {
+    "@babel/core": "^7.17.10",
+    "@babel/plugin-syntax-typescript": "^7.17.10",
+    "babel-type-scopes": "^1.1.0",
+    "magic-string": "^0.26.1",
+    "module-extractor": "link:",
+    "resolve": "^1.22.0",
+    "saxon": "^0.2.11",
+    "strict-event-emitter-types": "^2.0.0"
+  }
+}
