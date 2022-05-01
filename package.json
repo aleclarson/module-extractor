@@ -1,6 +1,6 @@
 {
   "name": "module-extractor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Extract a module and its dependencies into a new package",
   "author": "Alec Larson",
   "repository": "aleclarson/module-extractor",
