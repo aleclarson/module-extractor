@@ -47,3 +47,9 @@ extraction.then(() => {...})
   // All exports of "./foo" will be kept, even if only some are needed.
   import * as foo from './foo'
   ```
+
+- Top-level side effects with unused return values are not preserved
+  ```ts
+  // × Not preserved in module copy!
+  console.log('test')
+  ```
