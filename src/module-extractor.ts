@@ -102,7 +102,7 @@ export function extractModules({
   const extraction = new EventEmitter() as ModuleExtraction
   const modules = (extraction.modules = new Map<string, Module>())
   const modulesByImportDecl = new Map<NodePath, Module>()
-  const externalDeps = new Map<string, Module>()
+  const externalDeps = new Map<string, Module[]>()
 
   function addModule(modulePath: string, isEntry = false) {
     const moduleId = path.relative(srcRoot, modulePath)
@@ -164,8 +164,9 @@ export function extractModules({
         const sourcePath = source.node.value
         if (localPathRE.test(sourcePath)) {
           localDeps.set(decl, sourcePath)
-        } else if (isEntry) {
-          externalDeps.set(sourcePath, module)
+        } else {
+          const importers = externalDeps.get(sourcePath) || []
+          externalDeps.set(sourcePath, importers.concat(module))
         }
       }
     }
@@ -175,8 +176,9 @@ export function extractModules({
         const sourcePath = source.node.value
         if (localPathRE.test(sourcePath)) {
           localDeps.set(decl, sourcePath)
-        } else if (isEntry) {
-          externalDeps.set(sourcePath, module)
+        } else {
+          const importers = externalDeps.get(sourcePath) || []
+          externalDeps.set(sourcePath, importers.concat(module))
         }
       }
     }
@@ -292,6 +294,25 @@ export function extractModules({
         traverseExports(dep)
       }
 
+      const extractedModules = [
+        ...entryModules,
+        ...traversedExportsByModule.keys(),
+      ]
+
+      // 3. Extract modules, remove any unused code
+      extractModules(extractedModules)
+
+      // At least one of the extracted modules must import an external
+      // module before its package is added to the new package.json
+      for (const [id, importers] of externalDeps) {
+        const required = extractedModules.some(module =>
+          importers.includes(module)
+        )
+        if (!required) {
+          externalDeps.delete(id)
+        }
+      }
+
       debug &&
         debugLog(
           '\nExternal dependencies:',
@@ -299,9 +320,6 @@ export function extractModules({
             return '\n  ' + kleur.cyan(dep)
           }).join('')
         )
-
-      // 3. Extract modules, remove any unused code
-      extractModules([...entryModules, ...traversedExportsByModule.keys()])
 
       // 4. Create a new package.json
       const inPkg = require(path.join(pkgRoot, 'package.json'))
@@ -313,7 +331,7 @@ export function extractModules({
         }
       }
       const depTypes = ['dependencies', 'devDependencies', 'peerDependencies']
-      outer: for (const [id, importer] of externalDeps) {
+      outer: for (const [id, importers] of externalDeps) {
         // The `externalDeps` collection may contain nested module paths,
         // not just package names. Let's keep removing the last path part
         // until none are left or the package name is found.
@@ -335,7 +353,7 @@ export function extractModules({
             }
           }
         }
-        extraction.emit('moduleNotFound', id, importer.id)
+        extraction.emit('moduleNotFound', id, importers[0].id)
       }
       outer: for (const pkgId of depsToCopy) {
         for (const depType of depTypes) {
@@ -433,8 +451,6 @@ export function extractModules({
           }
           preserveImport(ref as NodePath<Imported>, dep)
           referencedDeps.add(dep)
-        } else {
-          externalDeps.set(sourcePath, module)
         }
       }
     }
@@ -460,7 +476,7 @@ export function extractModules({
   function extractModules(extractedModules: Module[]) {
     debug &&
       debugLog(
-        '\nExtracted modules:%s\n',
+        '\nExtracted modules:%s',
         extractedModules
           .sort((a, b) => (a.id < b.id ? -1 : 1))
           .map(module => '\n  ' + kleur.green(module.id))
