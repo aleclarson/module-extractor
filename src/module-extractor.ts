@@ -392,20 +392,50 @@ export function extractModules({
     })
   })
 
-  const moduleRefs = new Map<Module, Set<NodePath<Referenced>>>()
-  const traversedExportsByModule = new Map<Module, Set<string>>()
+  const sideEffectImports = new Map<Module, NodePath<t.ImportDeclaration>[]>()
+  const refsByModule = new Map<Module, Set<NodePath<Referenced>>>()
 
+  function trackReferences(module: Module, addedRefs: NodePath<Referenced>[]) {
+    let trackedRefs = refsByModule.get(module)
+    if (!trackedRefs) {
+      refsByModule.set(module, (trackedRefs = new Set()))
+    }
+    for (const ref of addedRefs) {
+      trackedRefs.add(ref)
+    }
+  }
+
+  const traversedExportsByModule = new Map<Module, Set<string>>()
   function traverseExports(module: Module) {
     let traversedExports = traversedExportsByModule.get(module)!
     if (!traversedExports) {
       traversedExportsByModule.set(module, (traversedExports = new Set()))
+
+      // The first time a module has exports traversed, check for any
+      // imports that don't bind variables and assume they are required.
+      const importedSideEffects: NodePath<t.ImportDeclaration>[] = []
+      module.imports.forEach((decls, dep) => {
+        for (const decl of decls) {
+          if (!decl.node.specifiers.length) {
+            importedSideEffects.push(decl)
+            // TODO: preserve side effects without disabling treeshake
+            disableTreeShake(dep)
+            traverseExports(dep)
+            break
+          }
+        }
+      })
+      if (importedSideEffects.length) {
+        sideEffectImports.set(module, importedSideEffects)
+      }
     }
 
-    let usedExportIds = module.noTreeShake
-      ? Object.keys(module.exports)
-      : Object.keys(module.usedExports)
+    if (module.noTreeShake) {
+      traversedExportsByModule.set(module, new Set(Object.keys(module.exports)))
+      return traverseAllImports(module)
+    }
 
-    usedExportIds = usedExportIds.filter(name => {
+    const usedExportIds = Object.keys(module.usedExports).filter(name => {
       if (!traversedExports.has(name)) {
         traversedExports.add(name)
         return true
@@ -439,8 +469,11 @@ export function extractModules({
     })
 
     // Save needed statements for the trimming phase.
-    const usedExportStmts = usedExports.map(decl => decl.getStatementParent()!)
-    moduleRefs.set(module, new Set(refs.concat(usedExportStmts)))
+    trackReferences(module, refs)
+    trackReferences(
+      module,
+      usedExports.map(decl => decl.getStatementParent()!)
+    )
 
     // Track which modules are referenced by our used exports.
     const referencedDeps = new Set<Module>()
@@ -476,6 +509,44 @@ export function extractModules({
     }
   }
 
+  /**
+   * Fast path for modules with tree-shaking disabled.
+   */
+  function traverseAllImports(module: Module) {
+    const referencedDeps = new Set<Module>()
+    module.imports.forEach((decls, dep) => {
+      referencedDeps.add(dep)
+      for (const decl of decls) {
+        for (const spec of decl.get('specifiers')) {
+          preserveImport(spec, dep)
+        }
+      }
+    })
+    for (const exported of Object.values(module.exports)) {
+      const exportDecl = exported.getStatementParent()
+      if (exportDecl?.isExportDeclaration()) {
+        const dep = getImportedModule(module, exportDecl)
+        if (dep) {
+          referencedDeps.add(dep)
+        }
+      }
+    }
+
+    debug &&
+      debugLog(
+        '\n%s used %d modules:',
+        module.id,
+        referencedDeps.size,
+        Array.from(referencedDeps, dep => {
+          return '\n  ' + kleur.green(dep.id)
+        }).join('')
+      )
+
+    for (const dep of referencedDeps) {
+      traverseExports(dep)
+    }
+  }
+
   function extractModules(extractedModules: Module[]) {
     debug &&
       debugLog(
@@ -493,13 +564,23 @@ export function extractModules({
       }
 
       const usedSpecs: NodePath<Imported>[] = []
-      const usedStmts = Array.from(moduleRefs.get(module)!, ref => {
+      const usedStmts = Array.from(refsByModule.get(module) || [], ref => {
         const stmt = ref.getStatementParent()!
         if (stmt.isImportDeclaration()) {
           usedSpecs.push(ref as NodePath<Imported>)
         }
         return stmt
       })
+
+      if (!usedStmts.length) {
+        writeModule(module)
+        continue
+      }
+
+      const importedSideEffects = sideEffectImports.get(module)
+      if (importedSideEffects) {
+        usedStmts.push(...importedSideEffects)
+      }
 
       const editor = new MagicString(module.code)
       for (const stmt of module.ast.get('body')) {
