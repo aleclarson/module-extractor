@@ -224,13 +224,6 @@ export function extractModules({
 
   const writtenModules = (extraction.writtenModules = new Map<string, string>())
   const writeModule = (module: Module, code = module.code) => {
-    debug &&
-      debugLog(
-        'writeModule: %s',
-        kleur.bold(module.id),
-        dryRun ? kleur.gray('(dry run)') : ''
-      )
-
     const outPath = path.join(outSrcRoot, module.id)
     if (!dryRun) {
       fs.mkdir(path.dirname(outPath))
