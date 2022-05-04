@@ -132,9 +132,9 @@ export function resolveReferences(
 
     let binding: Binding | TypeBinding | undefined = path.scope.getBinding(name)
     if (!binding) {
-      // For some odd reason, the "constructor" keyword always has
-      // a type binding, so we need to skip it.
-      if (name !== 'constructor') {
+      // A bug in babel-type-scopes leads to properties of "Object.prototype"
+      // always returning a type binding.
+      if (!(name in Object.prototype)) {
         binding = getTypeBinding(path, name)
       }
       if (!binding) {
