@@ -234,6 +234,25 @@ export function extractModules({
     extraction.emit('moduleWritten', outPath, code, module)
   }
 
+  function getImportedModule(
+    importer: Module,
+    importDecl: NodePath<t.ImportDeclaration | t.ExportDeclaration>
+  ) {
+    const source = importDecl.get('source') as NodePath<t.StringLiteral | null>
+    if (!source.node) {
+      return null
+    }
+    const sourcePath = source.node.value
+    if (!localPathRE.test(sourcePath)) {
+      return null
+    }
+    const dep = modulesByImportDecl.get(importDecl)
+    if (!dep) {
+      throw Error(`Missing "${sourcePath}" dependency`)
+    }
+    return dep
+  }
+
   const promise = new Promise<void>(resolve => {
     process.nextTick(() => {
       // 1. Resolve imported modules
@@ -264,12 +283,8 @@ export function extractModules({
             (exportDecl.isExportAllDeclaration() ||
               exportDecl.isExportNamedDeclaration())
           ) {
-            const sourcePath = exportDecl.node.source?.value
-            if (sourcePath && localPathRE.test(sourcePath)) {
-              const dep = modulesByImportDecl.get(exportDecl)
-              if (!dep) {
-                throw Error(`Missing "${sourcePath}" dependency`)
-              }
+            const dep = getImportedModule(entryModule, exportDecl)
+            if (dep) {
               preserveImport(exported as NodePath<Imported>, dep)
               entryDeps.add(dep)
             }
@@ -433,15 +448,10 @@ export function extractModules({
       if (ref.isExportDeclaration()) {
         continue
       }
-      const stmtParent = ref.getStatementParent()!
-      if (stmtParent.isImportDeclaration()) {
-        const source = stmtParent.get('source') as NodePath<t.StringLiteral>
-        const sourcePath = source.node.value
-        if (localPathRE.test(sourcePath)) {
-          const dep = modulesByImportDecl.get(stmtParent)
-          if (!dep) {
-            throw Error(`Missing "${sourcePath}" dependency`)
-          }
+      const stmtParent = ref.getStatementParent()
+      if (stmtParent?.isImportDeclaration()) {
+        const dep = getImportedModule(module, stmtParent)
+        if (dep) {
           preserveImport(ref as NodePath<Imported>, dep)
           referencedDeps.add(dep)
         }
