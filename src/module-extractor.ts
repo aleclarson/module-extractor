@@ -22,8 +22,11 @@ export interface ExtractModuleOptions {
   /**
    * Module paths (relative to `srcRoot`) that are intended to
    * be the entry point(s) to the new package.
+   *
+   * If a plain object is given, it maps an `outSrcRoot` to an
+   * entry point.
    */
-  entries: string[]
+  entries: string[] | Record<string, string>
   /**
    * The `src` directory shared by all entry modules.
    * Relative to the `pkgRoot` option.
@@ -32,10 +35,26 @@ export interface ExtractModuleOptions {
   srcRoot?: string
   /**
    * Where the associated `package.json` lives
+   * @deprecated Use `root` instead.
    */
-  pkgRoot: string
+  pkgRoot?: string
   /**
-   * Which properties to copy from `package.json`
+   * The directory that `srcRoot` and `packages` are resolved with.
+   */
+  root?: string
+  /**
+   * Tell the extractor where other `package.json` files exist, so their
+   * dependencies can be extracted. The paths in this option are relative
+   * to the `pkgRoot`.
+   *
+   * Useful for monorepos or scenarios where multiple `entries` exist
+   * in different packages.
+   *
+   * @default ["package.json"]
+   */
+  packages?: string[]
+  /**
+   * Which properties to copy from the first `packages` file
    * @default name|version|description|license|author|contributors|keywords|engines
    */
   pkgProps?: string[]
@@ -76,9 +95,12 @@ export interface ModuleExtraction
 }
 
 const localPathRE = /^\.\.?(\/|$)/
+const packageJsonId = 'package.json'
 
 export function extractModules({
   pkgRoot,
+  root = pkgRoot!,
+  packages: packageIds = ['./'],
   srcRoot = 'src',
   outPkgRoot,
   outSrcRoot = 'src',
@@ -89,15 +111,21 @@ export function extractModules({
   dryRun,
   debug,
 }: ExtractModuleOptions): ModuleExtraction {
+  if (!root) {
+    throw Error('The "root" option is required')
+  }
+
   const debugLog = debug ? console.log : null!
   const kleur = debug
     ? (require('kleur/colors') as typeof import('kleur/colors'))
     : null!
 
-  pkgRoot = path.resolve(pkgRoot)
-  srcRoot = path.resolve(pkgRoot, srcRoot)
+  root = path.resolve(root)
+  srcRoot = path.resolve(root, srcRoot)
   outPkgRoot = path.resolve(outPkgRoot)
   outSrcRoot = path.resolve(outPkgRoot, outSrcRoot)
+
+  const packages = packageIds.map(p => resolvePackageJson(root, p))
 
   const extraction = new EventEmitter() as ModuleExtraction
   const modules = (extraction.modules = new Map<string, Module>())
@@ -330,8 +358,10 @@ export function extractModules({
         )
 
       // 4. Create a new package.json
-      const inPkg = require(path.join(pkgRoot, 'package.json'))
       const outPkg: any = {}
+      for (const pkgPath of packages) {
+        const inPkg = require(pkgPath)
+      }
       for (const prop of pkgProps) {
         const val = inPkg[prop]
         if (val !== undefined) {
@@ -648,6 +678,23 @@ function preserveImport(spec: NodePath<Imported>, dep: Module) {
     const users = dep.usedExports[imported.name] || []
     dep.usedExports[imported.name] = users.concat(spec)
   }
+}
+
+type PackageJson = Record<string, any> & {
+  path: string
+}
+
+function resolvePackageJson(root: string, localPath: string): PackageJson {
+  const pkgPath = path.resolve(
+    root,
+    localPath,
+    path.basename(localPath) == packageJsonId ? '' : packageJsonId
+  )
+  const pkg = require(pkgPath)
+  Object.defineProperty(pkg, 'path', {
+    value: pkgPath,
+  })
+  return pkg
 }
 
 export const DEFAULT_PKG_PROPS = [
